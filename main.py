@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from playwright.sync_api import sync_playwright
+import traceback
 
 app = FastAPI()
 
@@ -7,36 +8,46 @@ URL_TOTALES = "https://resultadoelectoral.onpe.gob.pe/presentacion-backend/mesa/
 URL_VOTOS = "https://resultadoelectoral.onpe.gob.pe/presentacion-backend/eleccion-presidencial/participantes-ubicacion-geografica-nombre?idEleccion=10&tipoFiltro=eleccion"
 
 def fetch_json_with_browser(url: str):
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"]
+            )
+            page = browser.new_page()
 
-        response_holder = {"json": None}
+            response_holder = {"json": None}
 
-        def handle_response(response):
-            if response.url == url:
-                try:
-                    response_holder["json"] = response.json()
-                except Exception:
-                    pass
+            def handle_response(response):
+                if response.url == url:
+                    try:
+                        response_holder["json"] = response.json()
+                    except Exception:
+                        pass
 
-        page.on("response", handle_response)
-        page.goto(url, wait_until="networkidle", timeout=60000)
+            page.on("response", handle_response)
+            page.goto(url, wait_until="networkidle", timeout=60000)
 
-        # intento extra por si la respuesta no quedó capturada
-        if response_holder["json"] is None:
-            content = page.content()
+            if response_holder["json"] is None:
+                content = page.content()
+                browser.close()
+                return {
+                    "ok": False,
+                    "mensaje": "No se pudo leer JSON",
+                    "respuesta_html_inicio": content[:500]
+                }
+
             browser.close()
             return {
-                "ok": False,
-                "mensaje": "No se pudo leer JSON",
-                "respuesta_html_inicio": content[:500]
+                "ok": True,
+                "data": response_holder["json"]
             }
 
-        browser.close()
+    except Exception as e:
         return {
-            "ok": True,
-            "data": response_holder["json"]
+            "ok": False,
+            "mensaje": str(e),
+            "trace": traceback.format_exc()
         }
 
 @app.get("/")
